@@ -1,0 +1,2131 @@
+---
+title: "Analiza rozgrywek e-sportowych"
+author: "Patryk Marek"
+format: 
+  html:
+    toc: true
+    toc-title: Spis treści
+    embed-resources: true
+editor: visual
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(ggpubr)
+library(ggcorrplot)
+library(GGally)
+library(rstatix)
+library(car)
+
+#wizualizacja drzewa
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+
+library(rsample)
+```
+
+# Wczytanie danych
+
+```{r}
+#load(file="/home/patryk/Documents/Projekt/lol_data.rda")
+load(file="C:\\Users\\Patryk\\Desktop\\Studia\\Projekt_analiza\\lol_data.rda")
+LOL$Patch <- factor(LOL$Patch, levels = c("11.24","12.1","12.2","12.3","12.4","12.5","12.6","12.8","12.11","12.12","12.13","12.14","12.15","12.18"))
+LPL$Patch <- factor(LPL$Patch, levels = c("11.24","12.1","12.2","12.4","12.5","12.8","12.11","12.12","12.13","12.14","12.15","12.18"))
+LEC$Patch <- factor(LEC$Patch, levels = c("12.1","12.2","12.3","12.4","12.5","12.8","12.11","12.12","12.13","12.14","12.15","12.18"))
+LCK$Patch <- factor(LCK$Patch, levels = c("12.1","12.2","12.3","12.4","12.5","12.8","12.11","12.12","12.13","12.14","12.18"))
+LCS$Patch <- factor(LCS$Patch, levels = c("12.1","12.2","12.3","12.4","12.5","12.6","12.8","12.11","12.12","12.13","12.14","12.15","12.18"))
+LOL$Win <- as.factor(LOL$Win)
+```
+
+Dane zawierają 4 tysiące wierszy oraz 16 zmiennych z wynikami meczów e-sportowej sceny League of Legends na przestrzeni całego roku (sezon zimowy oraz wiosenny) w podziale na cztery główne regiony. Zbiór danych pobrany został ze strony [gol.gg](https://gol.gg/esports/home/) przy pomocy web scrappingu.
+
+```{r}
+head(LOL) %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+```
+
+Dane zawierają następujące zmienne pobrane ze strony
+
+-   Rezultat meczu
+-   Wynik meczu
+-   Eliminacje
+-   Złoto
+-   Wieże
+-   Smoki
+-   Przeciwnik
+-   Złoto przeciwnika
+-   Wieże przeciwnika
+-   Smoki przeciwnika
+-   Czas meczu
+-   Wersja gry
+-   Turniej
+
+Oraz cztery zmienne dodane już po pobraniu danych
+
+-   Drużyna której dotyczy mecz
+-   Region w którym rozgrywany był mecz
+-   Czas meczu wyrażony w sekundach
+-   Wartość logiczną czy drużyna wygrała mecz
+
+# Cele badawcze
+
+-   Analiza różnic w statystykach meczów pomiędzy drużynami w regionach głównych:
+
+    -   Europa
+
+    -   Ameryka Północna
+
+    -   Korea Południowa
+
+    -   Chiny
+
+-   Analiza różnic w statystykach pomiędzy regionami głównymi
+
+-   Istnienie wpływu wersji na statystyki w meczach
+
+-   Istnienie wpływu rodzaju turnieju na statystyki w meczach
+
+-   Budowa modelu do celów predykcji rezulatatu na podstawie statystyk
+
+# Analiza reginów głównych
+
+Jednym z czynników nakreślającym różnice pomiędzy drużynami w kontekście ogólnoświatowym jest dynamika i cechy szczególne regionów w których się znajdują.
+
+Sposobem na wykazanie charakterystyki regionu będzie zbadanie różnic pomiędzy drużynami pod względem najważniejszych statystyk określających styl gry tj. zdobyte eliminacje, zdobyte złoto, czas gry, oddane eliminacje.
+
+W tym celu wykorzystany będzie wielowymiarowy test MANOVA.
+
+## Analiza regionu Europy
+
+### Opis zbioru
+
+W regionie Eeuropejskim w rozgrywkach brało udział 10 drużyn, grając minimum 36 meczy na przestrzeni obu sezonów (18 meczy na sezon nie kwalifikując się do eliminacji). Średnia liczba rozegranych meczy to w przybliżeniu 55.
+
+```{r}
+#paste0(floor(mean(Duration_sec) / 60),":",(floor(mean(Duration_sec)) %% 60))
+mm <- floor(LEC$Duration_sec / 60)
+ss <- (LEC$Duration_sec %% 60)
+#mn_dur <- paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))
+```
+
+```{r}
+LEC[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>%
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+l_m <- LEC[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>% 
+  select(n)
+l_m <- sum(l_m)/10
+```
+
+```{r fig.width=12, fig.height=6}
+ggboxplot(LEC, x = "Team", y = "Golds", merge = T)
+ggboxplot(LEC, x = "Team", y = "Kills", merge = T)
+ggboxplot(LEC, x = "Team", y = "Vs_kills", merge = T)
+ggboxplot(LEC, x = "Team", y = "Duration_sec", merge = T)
+ggboxplot(LEC, x = "Team", y = "Towers", merge = T)
+ggboxplot(LEC, x = "Team", y = "Dragons", merge = T)
+```
+
+### Analiza różnic pomiędzy drużynami
+
+#### Obserwacje odstające
+
+W zbiorze występuje jedna obserwacja odstająca ekstremalnie jednowymiarowo ze względu na zmienną "czas gry". Dalsze etapy analizy będą prowadzone bez tej obserwacji.
+
+```{r include=FALSE}
+LEC %>% 
+  group_by(Team) %>% 
+  identify_outliers(Vs_kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LEC %>% 
+  group_by(Team) %>% 
+  identify_outliers(Kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+extrm <- LEC %>% 
+  group_by(Team) %>% 
+  identify_outliers(Duration_sec) %>% 
+  subset(.,is.extreme==TRUE)
+
+LEC2 <- setdiff(LEC,extrm[,1:18])
+```
+
+```{r}
+extrm[,-c(9:12,14:17)] %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+```
+
+W zbiorze występują trzy obserwacje odstające wilowymiarowo, dalsze etapy będą prowadzone bez tych obserwacji.
+
+```{r}
+LEC2[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE) %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+extrm2 <- LEC2[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE)
+
+LEC2 <- anti_join(LEC2, extrm2, by = c("Golds","Kills","Vs_kills"))
+```
+
+#### Badanie normalności jedno i wielowymiarowej
+
+```{r include=FALSE}
+LEC2 %>%
+  group_by(Team) %>%
+  shapiro_test(Golds, Kills, Vs_kills, Duration_sec) %>%
+  arrange(variable) %>% 
+  filter(.,p<0.05)
+```
+
+```{r}
+tab <- LEC2 %>%
+  select(Golds, Kills, Vs_kills, Duration_sec) %>%
+  mshapiro_test()
+tab$Wniosek <- "Brak normalności wielowymiarowej"
+tab %>% 
+  kable(digits = 12,caption = "M-Shapiro test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+<!-- ```{r} -->
+
+<!-- summary(powerTransform(cbind(LEC2$Golds,LEC2$Kills,LEC2$Vs_kills,LEC2$Duration_sec)~1, -->
+
+<!--                       family = "yjPower")) -->
+
+<!-- LEC_t <- LEC2 -->
+
+<!-- LEC_t$Golds <- log(LEC_t$Golds) -->
+
+<!-- LEC_t$Kills <- yjPower(LEC_t$Kills, lambda = 0.6) -->
+
+<!-- LEC_t$Vs_kills <- yjPower(LEC_t$Vs_kills, lambda = 0.5) -->
+
+<!-- LEC_t$Duration_sec <- log(LEC_t$Duration_sec) -->
+
+<!-- LEC_t %>% -->
+
+<!--   select(Golds, Kills, Duration_sec, Vs_kills) %>% -->
+
+<!--   mshapiro_test() %>% -->
+
+<!--   kable(digits = 25) -->
+
+<!-- hist(log(LEC2$Duration_sec)) -->
+
+<!-- ``` -->
+
+```{r include=FALSE}
+LEC %>% 
+  group_split(Team) %>% 
+  map(~mshapiro_test(.x[,c(3:4,8,17)]))
+```
+
+Założenie o normalności wielowymiarowej jak i normalności jednowymiarowej w przypadku niektórych zmiennych nie jest spełnione. Mimo wszystko test będzie dalej wykonywany ze względu na dosyć mocną odporność MANOVy na odchyłki od normalności. Dodatkowo trzeba będzie uwzględnić niespełnienie tego założenia podczas wykonywania testów post-hoc.
+
+#### Współliniowość
+
+```{r fig.align='center'}
+r <- cor(LEC2[,c("Golds","Kills","Vs_kills","Duration_sec")])
+ggcorrplot(r,lab = T)
+```
+
+Założenie o braku współliniowości zmiennych jest spełnione, wszystkie korelacje są poniżej wartości 0.9.
+
+```{r}
+results <- LEC2 %>%
+  select("Golds","Kills","Vs_kills","Duration_sec", "Team") %>%
+  group_by(Team) %>%
+  doo(~ggpairs(.) + theme_bw(), result = "plots")
+#results$plots
+```
+
+#### Homogeniczność macierzy kowariancji
+
+```{r}
+tab <- box_m(as.data.frame(LEC2[,c("Golds","Kills","Vs_kills","Duration_sec")]), LEC2$Team)
+tab <- tab[,1:2]
+tab$Wniosek <- "Homogenicznośc macierzy kowariancji"
+tab %>% 
+  kable(digits = 12,caption = "Box's M-test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Założenie jest spełnione.
+
+#### Homogeniczność wariancji
+
+```{r}
+tab <- LEC2 %>% 
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable) %>%
+  levene_test(value ~ Team)
+tab$Wniosek <- c("Homogeniczność wariancji","Homogeniczność wariancji","Homogeniczność wariancji","Brak homogeniczności wariancji")
+tab %>% 
+  kable(digits = 12,caption = "Levene test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+W przypadku jednej zmiennej niespełnione jest założenie o homogeniczności wariancji. Test będzie prowadzony dalej pomimo naruszenia tego założenia z wykorzystaniem statystyki Pillai'a zamiast Wilka.
+
+#### MANOVA
+
+```{r include=FALSE}
+model <- lm(cbind(Golds, Kills, Vs_kills, Duration_sec ) ~ Team, LEC2)
+Manova(model, test.statistic = "Pillai")
+```
+
+```{r}
+tab <- NULL
+tab <- data.frame("test stat" = 0.17364,"approx F" = 2.6825,`num Df` = 36,`den Df`=2128,
+                 "p.value" = 3.029e-07,`Signif.` = "***")
+tab %>% 
+  kable(digits = 12,caption = "Type II MANOVA Tests: Pillai test statistic") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Zatem na podstawie testu MANOVA ze statystyką Pillai'a przyjmujemy hipotezę o istotnych różnicach pomiędzy drużynami w sensie wielowymiarowym.
+
+#### Testy post-hoc
+
+```{r}
+grouped.data <- LEC2 %>%
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable)
+```
+
+Ze względu na niespełnienie założenia o normalności nie można wykorzystać testu ANOVA do porównań międzygrupowych. W tym celu wykorzystana będzie wersja nieparametryczna - test Kruskala-Wallisa
+
+```{r include=FALSE}
+grouped.data %>% welch_anova_test(value ~ Team)
+grouped.data %>% kruskal_test(value ~ Team)
+grouped.data %>% anova_test(value ~ Team)
+```
+
+```{r}
+tab <- grouped.data %>% kruskal_test(value ~ Team)
+tab[,c(-2,-7)] %>% 
+  kable(caption = "Kruskal-Wallis test") %>% 
+  kable_classic_2(full_width = F) %>% 
+  row_spec(3:4, background = "yellow")
+```
+
+Do porównań parami wykorzystany będzie test Games'a-Howell'a ze względu na niespełnienie założenia o homogeniczności wariancji oraz o zblansowanej liczbie obserwacji w grupach.
+
+```{r}
+pwc <- LEC2 %>%
+  gather(key = "variables", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Team) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc2 <- pwc %>% 
+  subset(.,p.adj.signif!="ns")
+pwc2 %>% 
+  kable(caption = "Games-Howell test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+```{r}
+filtr <- filter(LEC,Team %in% c("G2 Esports","Misfits Gaming","Rogue","Team BDS","SK Gaming"))
+
+pwc3 <- pwc2[,-2]
+pwc3$y.position <- seq(33, by = 1.5, length.out = 5)
+pwc3$xmin <- c(1,1,1,3,3)
+pwc3$xmax <- c(4,2,5,2,5)
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 2.6825, p= "<0.0001", parameter = "36,2128",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = c("Vs_kills","Kills"), merge = T,
+          palette = c("blue", "red"))+
+  stat_pvalue_manual(
+    pwc3, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "variables"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Eliminacje \n")
+```
+
+### Wnioski
+
+Z przeprowadzonej wielowymiarowej analizy wariancji wnioskować można, że region Europy jest mocno zbalansowany pod względem umiejętności. Różnice wykryte zostały w dwóch z czterech analizowanych statystyk, z czego tylko jedna jednoznacznie.
+
+Testy post-hoc jak można było się spodziwać wskazały na różnice pomiędzy finalistami truniejów, a drużynami niekwalifikującymi się do finałów.
+
+Wpomagając się dodatkowo statystykami opisowymi oraz wykresami ramka-wąsy wszystkich statystyk podstawne jest stwierdzenie, że SK Gaming oraz Team BDS były najgorszymi drużynami w sezonie 2022.
+
+## Analiza regionu Ameryki północnej
+
+### Opis zbioru
+
+W regionie Amerykańskim w rozgrywkach brało udział 10 drużyn. Region ten prowadzi większą ilość rozgrywek na przestrzeni sezonu, minimum 40 gier na drużynę, ze średnią na poziomie 66 gier (różnica względem Europy powodowana jest przez większą liczbę drużyn biorących udział w finałach sezonu). 
+
+```{r}
+#paste0(floor(mean(Duration_sec) / 60),":",(floor(mean(Duration_sec)) %% 60))
+mm <- floor(LCS$Duration_sec / 60)
+ss <- (LCS$Duration_sec %% 60)
+#mn_dur <- paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))
+```
+
+```{r}
+LCS[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>%
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+l_m <- LCS[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>% 
+  select(n)
+l_m <- sum(l_m)/10
+```
+
+```{r fig.width=12, fig.height=6}
+ggboxplot(LCS, x = "Team", y = "Golds", merge = T)
+ggboxplot(LCS, x = "Team", y = "Kills", merge = T)
+ggboxplot(LCS, x = "Team", y = "Vs_kills", merge = T)
+ggboxplot(LCS, x = "Team", y = "Towers", merge = T)
+ggboxplot(LCS, x = "Team", y = "Dragons", merge = T)
+```
+
+### Analiza różnic pomiędzy drużynami
+
+#### Obserwacje odstające
+
+W zbiorze nie występują obserwacje odstające jednowymiarowo.
+
+```{r include=FALSE}
+LCS %>% 
+  group_by(Team) %>% 
+  identify_outliers(Vs_kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LCS %>% 
+  group_by(Team) %>% 
+  identify_outliers(Kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LCS %>% 
+  group_by(Team) %>% 
+  identify_outliers(Golds) %>% 
+  subset(.,is.extreme==TRUE)
+
+LCS %>% 
+  group_by(Team) %>% 
+  identify_outliers(Duration_sec) %>% 
+  subset(.,is.extreme==TRUE)
+```
+
+W zbiorze występują dwie obserwacje odstające wilowymiarowo, dalsze etapy będą prowadzone bez tych obserwacji.
+
+```{r}
+LCS[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE) %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+extrm2 <- LCS[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE)
+
+LCS <- anti_join(LCS, extrm2, by = c("Golds","Kills","Vs_kills"))
+```
+
+#### Badanie normalności jedno i wielowymiarowej
+
+```{r include=FALSE}
+LCS %>%
+  group_by(Team) %>%
+  shapiro_test(Golds, Kills, Vs_kills, Duration_sec) %>%
+  arrange(variable) %>% 
+  filter(.,p<0.05)
+```
+
+```{r}
+tab <- LCS %>%
+  select(Golds, Kills, Vs_kills, Duration_sec) %>%
+  mshapiro_test()
+tab$Wniosek <- "Brak normalności wielowymiarowej"
+tab %>% 
+  kable(digits = 12,caption = "M-Shapiro test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+```{r include=FALSE}
+LCS %>% 
+  group_split(Team) %>% 
+  map(~mshapiro_test(.x[,c(3:4,8,17)]))
+```
+
+Założenie o normalności wielowymiarowej jak i normalności jednowymiarowej w przypadku niektórych zmiennych nie jest spełnione. Mimo wszystko test będzie dalej wykonywany ze względu na dosyć mocną odporność MANOVy na odchyłki o normalności. Dodatkowo trzeba będzie uwzględnić niespełnienie tego założenia podczas wykonywania testów post-hoc.
+
+#### Współliniowość
+
+```{r fig.align='center'}
+r <- cor(LCS[,c("Golds","Kills","Vs_kills","Duration_sec")])
+ggcorrplot(r,lab = T)
+```
+
+Założenie o braku współliniowości zmiennych jest spełnione, wszystkie korelacje są poniżej wartości 0.9.
+
+```{r}
+results <- LCS %>%
+  select("Golds","Kills","Vs_kills","Duration_sec", "Team") %>%
+  group_by(Team) %>%
+  doo(~ggpairs(.) + theme_bw(), result = "plots")
+#results$plots
+```
+
+#### Homogeniczność macierzy kowariancji
+
+```{r}
+tab <- box_m(as.data.frame(LCS[,c("Golds","Kills","Vs_kills","Duration_sec")]), LCS$Team)
+tab <- tab[,1:2]
+tab$Wniosek <- "Brak homogenicznośc macierzy kowariancji"
+tab %>% 
+  kable(digits = 6,caption = "Box's M-test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Założenie o homogeniczności macierzy kowariancji nie jest spełnione. Test będzie prowadzony dalej pomimo naruszenia tego założenia z wykorzystaniem statystyki Pillai'a zamiast Wilka.
+
+#### Homogeniczność wariancji
+
+```{r}
+tab <- LCS %>% 
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable) %>%
+  levene_test(value ~ Team)
+tab$Wniosek <- c("Homogeniczność wariancji","Brak homogeniczności wariancji","Homogeniczność wariancji","Brak homogeniczności wariancji")
+tab %>% 
+  kable(digits = 12,caption = "Levene test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+W przypadku dwóch z czterech zmiennych założenie o homogeniczności wariancji nie jest spełnione. Test będzie prowadzony dalej pomimo naruszenia, z mniejszą mocą i wykorzystaniem innych testów post-hoc niż ANOVA.
+
+#### MANOVA
+
+```{r include=FALSE}
+model <- lm(cbind(Golds, Kills, Vs_kills, Duration_sec ) ~ Team, LCS)
+Manova(model, test.statistic = "Pillai")
+```
+
+```{r}
+tab <- NULL
+tab <- data.frame("test stat" = 0.16576,"approx F" = 3.1175,`num Df` = 36,`den Df`=2596,
+                 "p.value" = 1.641e-09,`Signif.` = "***")
+tab %>% 
+  kable(digits = 12,caption = "Type II MANOVA Tests: Pillai test statistic") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Zatem na podstawie testu MANOVA ze statystyką Pillai'a przyjmujemy hipotezę o istotnych różnicach pomiędzy drużynami w sensie wielowymiarowym.
+
+#### Testy post-hoc
+
+```{r}
+grouped.data <- LCS %>%
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable)
+```
+
+Ze względu na niespełnienie założenia o normalności i braku homogeniczności wariancji nie można wykorzystać testu ANOVA do porównań międzygrupowych. W tym celu wykorzystana będzie wersja nieparametryczna - test Kruskala-Wallisa.
+
+```{r include=FALSE}
+grouped.data %>% welch_anova_test(value ~ Team)
+grouped.data %>% kruskal_test(value ~ Team)
+grouped.data %>% anova_test(value ~ Team)
+```
+
+```{r}
+tab <- grouped.data %>% kruskal_test(value ~ Team)
+tab[,c(-2,-7)] %>% 
+  kable(caption = "Kruskal-Wallis test", digits = 5) %>% 
+  kable_classic_2(full_width = F) %>% 
+  row_spec(3:4, background = "yellow")
+```
+
+Do porównań parami wykorzystany będzie test Games'a-Howell'a ze względu na niespełnienie założenia o homogeniczności wariancji oraz o zblansowanej liczbie obserwacji w grupach.
+
+```{r}
+pwc <- LCS %>%
+  gather(key = "variables", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Team) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc2 <- pwc %>% 
+  subset(.,p.adj.signif!="ns")
+pwc2[,-2] %>% 
+  kable(caption = "Games-Howell test", digits = 5) %>% 
+  kable_classic_2(full_width = F)
+```
+
+```{r}
+filtr <- filter(LCS,Team %in% c("Dignitas","Evil Geniuses","Immortals",
+                                "Golden Guardians","Team Liquid","CLG","TSM"))
+
+pwc3 <- subset(pwc2,variables %in% "Kills") %>% 
+  subset(.,p.adj.signif %in% c("**","****"))
+
+pwc3 <- rbind(pwc3,subset(pwc2,variables %in% "Vs_kills"))
+
+pwc3$y.position <- seq(30, by = 1.5, length.out = 8)
+pwc3$xmin <- c(2,3,3,5,6,6,6,6)
+pwc3$xmax <- c(3,4,5,6,1,4,5,7)
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 3.1175, p= "<0.0001", parameter = "36,2596",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = c("Vs_kills","Kills"), merge = T,
+          palette = c("blue", "red"))+
+  stat_pvalue_manual(
+    pwc3, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.15, step.group.by = "variables",
+    color = "variables"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Eliminacje \n")
+```
+
+### Wnioski
+
+Z przeprowadzonej wielowymiarowej analizy wariancji wnioskować można, że region Ameryki Północnej podobnie jak Europa jest zbalansowany pod względem umiejętności drużyn. Różnice wykryte zostały w dwóch z czterech analizowanych statystyk, w obu przypadkach decyzja jest jednoznaczna.
+
+Testy post-hoc ponownie wskazały na różnice pomiędzy drużynami kończącymi split w górnej części tabeli, a drużynami z ostatnich miejsc. Największa różnica występuje pomiędzy zwycięzcą wiosennego splitu, a drużyna która zajęła ostatnie miejsce w tym samym turnieju.
+
+W przypadku tego regionu pomimo iż na podstawie analizy wariancji oraz statystyk opisowych wraz z ich wizualizacją wskazać można Evil Geniuses i Team Liquid jako drużyny potencjalnie najsilniejsze, tylko pierwsza z tych dwóch formacji zakwalifikowała się do Mistrzostw Świata.
+
+## Analiza regionu Korei Południowej
+
+### Opis zbioru
+
+W regionie Koreańskim w rozgrywkach brało udział 10 drużyn, grając minimum 18 meczy na przestrzeni jednego splitu, średnia liczba gier na drużynę to aż 106. Większa liczba meczy wynika z dodatkowego etapu rozgrywek (finału regionalnego) oraz większej prezenecji na eventach międzynarodowych.
+
+```{r}
+#paste0(floor(mean(Duration_sec) / 60),":",(floor(mean(Duration_sec)) %% 60))
+mm <- floor(LCK$Duration_sec / 60)
+ss <- (LCK$Duration_sec %% 60)
+#mn_dur <- paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))
+```
+
+```{r}
+LCK[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>%
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+l_m <- LCK[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>% 
+  select(n)
+l_m <- sum(l_m)/10
+```
+
+```{r fig.width=14, fig.height=6}
+ggboxplot(LCK, x = "Team", y = "Golds", merge = T)
+ggboxplot(LCK, x = "Team", y = "Kills", merge = T)
+ggboxplot(LCK, x = "Team", y = "Vs_kills", merge = T)
+ggboxplot(LCK, x = "Team", y = "Towers", merge = T)
+ggboxplot(LCK, x = "Team", y = "Dragons", merge = T)
+```
+
+### Analiza różnic pomiędzy drużynami
+
+#### Obserwacje odstające
+
+W zbiorze nie występują obserwacje odstające jednowymiarowo.
+
+```{r include=FALSE}
+LCK %>% 
+  group_by(Team) %>% 
+  identify_outliers(Vs_kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LCK %>% 
+  group_by(Team) %>% 
+  identify_outliers(Kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LCK %>% 
+  group_by(Team) %>% 
+  identify_outliers(Golds) %>% 
+  subset(.,is.extreme==TRUE)
+
+LCK %>% 
+  group_by(Team) %>% 
+  identify_outliers(Duration_sec) %>% 
+  subset(.,is.extreme==TRUE)
+```
+
+W zbiorze występuje pięć obserwacje odstających wilowymiarowo, dalsze etapy będą prowadzone bez tych obserwacji.
+
+```{r}
+LCK[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE) %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+extrm2 <- LCK[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE)
+
+LCK <- anti_join(LCK, extrm2, by = c("Golds","Kills","Vs_kills"))
+
+```
+
+#### Badanie normalności jedno i wielowymiarowej
+
+```{r include=FALSE}
+LCK %>%
+  group_by(Team) %>%
+  shapiro_test(Golds, Kills, Vs_kills, Duration_sec) %>%
+  arrange(variable) %>% 
+  filter(.,p<0.05)
+```
+
+```{r}
+tab <- LCK %>%
+  select(Golds, Kills, Vs_kills, Duration_sec) %>%
+  mshapiro_test()
+tab$Wniosek <- "Brak normalności wielowymiarowej"
+tab %>% 
+  kable(digits = 12,caption = "M-Shapiro test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+<!-- ```{r} -->
+
+<!-- summary(powerTransform(cbind(LCK$Golds,LCK$Kills,LCK$Vs_kills,LCK$Duration_sec)~1, -->
+
+<!--                       family = "yjPower")) -->
+
+<!-- LCK_t <- LCK -->
+
+<!-- LCK_t$Golds <- yjPower(LCK_t$Golds, lambda = 0.5) -->
+
+<!-- LCK_t$Kills <- yjPower(LCK_t$Kills, lambda = 0.66) -->
+
+<!-- LCK_t$Vs_kills <- yjPower(LCK_t$Vs_kills, lambda = 0.6) -->
+
+<!-- LCK_t$Duration_sec <- yjPower(LCK_t$Duration_sec, lambda = 0.5) -->
+
+<!-- LCK_t %>% -->
+
+<!--   select(Golds, Kills, Duration_sec, Vs_kills) %>% -->
+
+<!--   mshapiro_test() -->
+
+<!-- hist(LCK_t$Duration_sec) -->
+
+<!-- ``` -->
+
+```{r include=FALSE}
+LCK %>% 
+  group_split(Team) %>% 
+  map(~mshapiro_test(.x[,c(3:4,8,17)]))
+```
+
+Założenie o normalności wielowymiarowej jak i normalności jednowymiarowej w przypadku niektórych zmiennych nie jest spełnione. Mimo wszystko test będzie dalej wykonywany ze względu na dosyć mocną odporność MANOVy na odchyłki o normalności. Dodatkowo trzeba będzie uwzględnić niespełnienie tego założenia podczas wykonywania testów post-hoc.
+
+#### Współliniowość
+
+```{r fig.align='center'}
+r <- cor(LCK[,c("Golds","Kills","Vs_kills","Duration_sec")])
+ggcorrplot(r,lab = T)
+```
+
+Założenie o braku współliniowości zmiennych jest spełnione, wszystkie korelacje są poniżej wartości 0.9.
+
+```{r}
+results <- LCK %>%
+  select("Golds","Kills","Vs_kills","Duration_sec", "Team") %>%
+  group_by(Team) %>%
+  doo(~ggpairs(.) + theme_bw(), result = "plots")
+#results$plots
+```
+
+#### Homogeniczność macierzy kowariancji
+
+```{r}
+tab <- box_m(as.data.frame(LCK[,c("Golds","Kills","Vs_kills","Duration_sec")]), LCK$Team)
+tab <- tab[,1:2]
+tab$Wniosek <- "Brak homogeniczności macierzy kowariancji"
+tab %>% 
+  kable(digits = 12,caption = "Box's M-test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Założenie nie jest spełnione, w dalszych etapach wykorzystana będzie statystyka Pillai'a.
+
+#### Homogeniczność wariancji
+
+```{r}
+tab <- LCK %>% 
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable) %>%
+  levene_test(value ~ Team)
+tab$Wniosek <- "Homogeniczność wariancji"
+tab %>% 
+  kable(digits = 12,caption = "Levene test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+W przypadku wszystkich zmiennych spełnione jest założenie o homogeniczności wariancji.
+
+#### MANOVA
+
+```{r include=FALSE}
+model <- lm(cbind(Golds, Kills, Vs_kills, Duration_sec ) ~ Team, LCK)
+Manova(model, test.statistic = "Pillai")
+```
+
+```{r}
+tab <- NULL
+tab <- data.frame("test stat" = 0.24402,"approx F" = 7.529,`num Df` = 36,`den Df`=4172,
+                 "p.value" = "< 2.2e-16",`Signif.` = "***")
+tab %>% 
+  kable(digits = 12,caption = "Type II MANOVA Tests: Pillai test statistic") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Zatem na podstawie testu MANOVA ze statystyką Pillai'a przyjmujemy hipotezę o istotnych różnicach pomiędzy drużynami w sensie wielowymiarowym.
+
+#### Testy post-hoc
+
+```{r}
+grouped.data <- LCK %>%
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable)
+```
+
+Ze względu na niespełnienie założenia o normalności nie można wykorzystać testu ANOVA do porównań międzygrupowych. W tym celu wykorzystana będzie wersja nieparametryczna - test Kruskala-Wallisa
+
+```{r include=FALSE}
+grouped.data %>% welch_anova_test(value ~ Team)
+grouped.data %>% kruskal_test(value ~ Team)
+grouped.data %>% anova_test(value ~ Team)
+```
+
+```{r}
+tab <- grouped.data %>% kruskal_test(value ~ Team)
+tab[,c(-2,-7)] %>% 
+  kable(caption = "Kruskal-Wallis test") %>% 
+  kable_classic_2(full_width = F) %>% 
+  row_spec(1:4, background = "yellow")
+```
+
+Do porównań parami wykorzystany będzie test Gamesa-Howella, pomimo spełnienie założenia o homogeniczności wariancji nie można użyć testu Tukey'a ze względu na niezbalansowanie grup.
+
+```{r}
+pwc <- LCK %>%
+  gather(key = "variables", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Team) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc2 <- pwc %>% 
+  subset(.,p.adj.signif!="ns")
+pwc2 %>% 
+  kable(caption = "Games-Howell test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+```{r}
+filtr <- filter(LCK,Team %in% c("DWG KIA","Fredit BRION","Gen.G eSports",
+                                "Hanwha Life eSports","Kwangdong Freecs","T1"))
+pwc_kills <- filtr %>%
+  gather(key = "variables", value = "value", Kills) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Team) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc_kills <- pwc_kills %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_kills <- pwc_kills %>% add_xy_position(x = "Team")
+y.pos <- pwc3$y.position
+pwc_kills <- pwc_kills %>% 
+  subset(.,p.adj.signif %in% c("****"))
+pwc_pom <- pwc2 %>% 
+  subset(.,variables=="Kills") %>% 
+  subset(.,p.adj.signif %in% c("****"))
+pwc_kills <- cbind(pwc_pom,pwc_kills[,7:10])
+pwc_kills$y.position <- seq(33, by = 3, length.out = 6)
+pwc_kills$xmin <- c(3,6,2,3,4,1)
+pwc_kills$xmax <- c(6,4,4,5,5,5)
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 2.5831, p= "<0.0001", parameter = "36,2140",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center',fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = "Kills", merge = T)+
+  stat_pvalue_manual(
+    pwc_kills, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Zdobyte eliminacje \n")
+```
+
+```{r}
+filtr <- filter(LCK,Team %in% c("DWG KIA","Nongshim RedForce","Gen.G eSports",
+                                "Hanwha Life eSports","Liiv SANDBOX"))
+pwc_Vs_kills <- filtr %>%
+  gather(key = "variables", value = "value", Vs_kills) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Team) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc_Vs_kills <- pwc_Vs_kills %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_Vs_kills <- pwc_Vs_kills %>% add_xy_position(x = "Team")
+y.pos <- pwc3$y.position
+pwc_Vs_kills <- pwc_Vs_kills %>% 
+  subset(.,p.adj.signif %in% c("***","****"))
+pwc_pom <- pwc2 %>% 
+  subset(.,variables=="Vs_kills") %>% 
+  subset(.,p.adj.signif %in% c("**","***","****"))
+pwc_Vs_kills <- cbind(pwc_pom,pwc_Vs_kills[,7:10])
+pwc_Vs_kills$y.position <- seq(33, by = 3, length.out = 4)
+pwc_Vs_kills$xmin <- c(1,5,5,5)
+pwc_Vs_kills$xmax <- c(2,2,3,4)
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 2.5831, p= "<0.0001", parameter = "36,2140",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center',fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = "Vs_kills", merge = T)+
+  stat_pvalue_manual(
+    pwc_Vs_kills, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Stracone eliminacje \n")
+```
+
+```{r}
+filtr <- filter(LCK,Team %in% c("DWG KIA","KT Rolster","Gen.G eSports",
+                                "Liiv SANDBOX","DRX"))
+pwc_golds <- pwc2 %>% 
+  subset(.,variables=="Golds") %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_golds$y.position <- seq(110, by = 3, length.out = 4)
+pwc_golds$xmin <- c(4,4,4,4)
+pwc_golds$xmax <- c(2,1,3,5)
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 2.5831, p= "<0.0001", parameter = "36,2140",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center',fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = "Golds", merge = T)+
+  stat_pvalue_manual(
+    pwc_golds, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("Golds")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Zdobyte złoto \n")
+```
+
+```{r}
+filtr <- filter(LCK,Team %in% c("Fredit BRION","Kwangdong Freecs",
+                                "Liiv SANDBOX","DRX","T1","Gen.G eSports","DWG KIA"))
+pwc_Duration <- pwc2 %>% 
+  subset(.,variables=="Duration_sec") %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_Duration$y.position <- seq(3500, by = 3, length.out = 8)
+pwc_Duration$xmax <- c(3,3,2,4,4,7,1,1)
+pwc_Duration$xmin <- c(5,6,6,5,6,1,5,6)
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 2.5831, p= "<0.0001", parameter = "36,2140",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center',fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = "Duration_sec", merge = T)+
+  stat_pvalue_manual(
+    pwc_Duration, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("Time")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Czas gry \n")
+```
+
+### Wnioski
+
+Z przeprowadzonej wielowymiarowej analizy wariancji widać, że Korea jest znacznie bardziej zróżnicowanym regionem jeżeli chodzi o poziom umiejętności (w szczególności w zestawieniu z dwoma poprzednimi regionami). Test Kruskala-Wallisa wykazał istotne różnice we wszystkich czterech statystykach.
+
+Testy post-hoc wskazały ponad 30 różnic pomiędzy drużynami, jednak skupiając się tylko na tych najbardziej istotnych, wyróżnić można dwie dróżyny które szczególnie odbiegały od pozostałych: T1 oraz Gen.G.
+
+Obie te drużyny dotarły minimum do półfinału mistrzostw świata 2022, czego zasadność widać w wykazanych różnicach.
+
+Najciekawszym przypadkiem w tym regionie jest fakt, że aktualny mistrz świata będący z Korei nie odbiega od pozostałych drużyn, chociażby tak jak Gen.G (które było jednym z faworytów do zdobycia tego tytułu).
+
+
+## Analiza regionu Chin
+
+### Opis zbioru
+
+W regionie Chińskim w rozgrywkach bierze udział nawjwiększa liczba drużyn, bo aż 17. Rozgrywają także największą ilość meczy, średnia wynosi 105 gier. W regularnym splicie grają mniej meczy niż w pozostałych regionach (16 zamiast 18), natomiast finały każdego splitu składają się aż z 6 rund.
+
+```{r}
+#paste0(floor(mean(Duration_sec) / 60),":",(floor(mean(Duration_sec)) %% 60))
+mm <- floor(LPL$Duration_sec / 60)
+ss <- (LPL$Duration_sec %% 60)
+#mn_dur <- paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))
+```
+
+```{r}
+LPL[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>%
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+l_m <- LPL[,c(1:7,12:17)] %>% 
+  group_by(Team) %>% 
+  summarise(n=n(),mean_gold=round(mean(Golds),1),sd_gold=round(sd(Golds),1),mean_kills=round(mean(Kills),1),sd_kills=round(sd(Kills),1), mean_time=paste0(floor(mean(Duration_sec) / 60),":",sprintf("%02d",floor(mean(Duration_sec)) %% 60))) %>% 
+  select(n)
+l_m <- sum(l_m)/17
+```
+
+```{r fig.width=22, fig.height=6}
+ggboxplot(LPL, x = "Team", y = "Golds", merge = T)
+ggboxplot(LPL, x = "Team", y = "Kills", merge = T)
+ggboxplot(LPL, x = "Team", y = "Vs_kills", merge = T)
+ggboxplot(LPL, x = "Team", y = "Towers", merge = T)
+ggboxplot(LPL, x = "Team", y = "Dragons", merge = T)
+```
+
+### Analiza różnic pomiędzy drużynami
+
+#### Obserwacje odstające
+
+W zbiorze występuje jedna obserwacja odstająca ekstremalnie jednowymiarowo ze względu na zmienną "czas gry". Dalsze etapy analizy będą prowadzone bez tej obserwacji
+
+```{r include=FALSE}
+LPL %>% 
+  group_by(Team) %>% 
+  identify_outliers(Vs_kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LPL %>% 
+  group_by(Team) %>% 
+  identify_outliers(Kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LPL %>% 
+  group_by(Team) %>% 
+  identify_outliers(Golds) %>% 
+  subset(.,is.extreme==TRUE)
+
+LPL %>% 
+  group_by(Team) %>% 
+  identify_outliers(Duration_sec) %>% 
+  subset(.,is.extreme==TRUE)
+
+extrm <- LPL %>% 
+  group_by(Team) %>% 
+  identify_outliers(Duration_sec) %>% 
+  subset(.,is.extreme==TRUE)
+
+LPL2 <- setdiff(LPL,extrm[,1:18])
+```
+
+```{r }
+extrm[,-c(9:12,14:17)] %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+```
+
+W zbiorze występują 11 obserwacji odstających wilowymiarowo, dalsze etapy będą prowadzone bez tych obserwacji.
+
+```{r}
+LPL2[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE) %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+extrm2 <- LPL2[,c("Golds","Kills","Vs_kills","Duration_sec","Team")] %>% 
+  group_by(Team) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE)
+
+LPL2 <- anti_join(LPL2, extrm2, by = c("Golds","Kills","Vs_kills"))
+```
+
+#### Badanie normalności jedno i wielowymiarowej
+
+```{r include=FALSE}
+LPL2 %>%
+  group_by(Team) %>%
+  shapiro_test(Golds, Kills, Vs_kills, Duration_sec) %>%
+  arrange(variable) %>% 
+  filter(.,p<0.05)
+```
+
+```{r}
+tab <- LPL2 %>%
+  select(Golds, Kills, Vs_kills, Duration_sec) %>%
+  mshapiro_test()
+tab$Wniosek <- "Brak normalności wielowymiarowej"
+tab %>% 
+  kable(digits = 12,caption = "M-Shapiro test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+<!-- ```{r} -->
+
+<!-- t1 <- LEC2 %>%  -->
+
+<!--   filter(Kills!=0) -->
+
+<!-- t2 <- LEC2 %>%  -->
+
+<!--   filter(Vs_kills!=0) -->
+
+<!-- summary(powerTransform(cbind(LEC2$Golds,t1$Kills,t2$Vs_kills,LEC2$Duration_sec)~1)) -->
+
+<!-- shapiro_test(LEC_t$Kills) -->
+
+<!-- hist(LEC_t$Kil) -->
+
+<!-- LEC_t <- LEC2 -->
+
+<!-- LEC_t$Kills <- LEC_t$Kills^(0.68) -->
+
+<!-- LEC_t$Vs_kills <- LEC_t$Vs_kills^(0.68) -->
+
+<!-- LEC_t$Duration_sec <- sqrt(LEC_t$Duration_sec) -->
+
+<!-- LEC_t %>% -->
+
+<!--   select(Golds, Kills, Duration_sec, Vs_kills) %>% -->
+
+<!--   mshapiro_test() -->
+
+<!-- ``` -->
+
+```{r include=FALSE}
+LPL2 %>% 
+  group_split(Team) %>% 
+  map(~mshapiro_test(.x[,c(3:4,8,17)]))
+```
+
+Założenie o normalności wielowymiarowej jak i normalności jednowymiarowej w przypadku niektórych zmiennych nie jest spełnione. Mimo wszystko test będzie dalej wykonywany ze względu na dosyć mocną odporność MANOVy na odchyłki o normalności. Dodatkowo trzeba będzie uwzględnić niespełnienie tego założenia podczas wykonywania testów post-hoc.
+
+#### Współliniowość
+
+```{r fig.align='center'}
+r <- cor(LPL2[,c("Golds","Kills","Vs_kills","Duration_sec")])
+ggcorrplot(r,lab = T)
+```
+
+Założenie o braku współliniowości zmiennych jest spełnione, wszystkie korelacje są poniżej wartości 0.9.
+
+```{r}
+results <- LPL2 %>%
+  select("Golds","Kills","Vs_kills","Duration_sec", "Team") %>%
+  group_by(Team) %>%
+  doo(~ggpairs(.) + theme_bw(), result = "plots")
+#results$plots
+```
+
+#### Homogeniczność macierzy kowariancji
+
+```{r}
+tab <- box_m(as.data.frame(LPL2[,c("Golds","Kills","Vs_kills","Duration_sec")]), LPL2$Team)
+tab <- tab[,1:2]
+tab$Wniosek <- "Brak homogeniczności macierzy kowariancji"
+tab %>% 
+  kable(digits = 12,caption = "Box's M-test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Założenie nie jest spełnione, w dalszych etapach wykorzystana będzie statystyka Pillai'a.
+
+#### Homogeniczność wariancji
+
+```{r}
+tab <- LPL2 %>% 
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable) %>%
+  levene_test(value ~ Team)
+tab$Wniosek <- c("Brak homogeniczności wariancji","Brak homogeniczności wariancji",
+                 "Homogeniczność wariancji","Homogeniczność wariancji")
+tab %>% 
+  kable(digits = 12,caption = "Levene test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+W przypadku dwóch z czterech zmiennych założenie o homogeniczności wariancji nie jest spełnione. Test będzie prowadzony dalej pomimo naruszenia, z mniejszą mocą i wykorzystaniem innych testów post-hoc niż ANOVA.
+
+#### MANOVA
+
+```{r include=FALSE}
+model <- lm(cbind(Golds, Kills, Vs_kills, Duration_sec ) ~ Team, LPL2)
+Manova(model, test.statistic = "Pillai")
+```
+
+```{r}
+tab <- NULL
+tab <- data.frame("test stat" = 0.1586,"approx F" = 4.5133,`num Df` = 64,`den Df`=6996,
+                 "p.value" = "< 2.2e-16",`Signif.` = "***")
+tab %>% 
+  kable(digits = 12,caption = "Type II MANOVA Tests: Pillai test statistic") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Zatem na podstawie testu MANOVA ze statystyką Pillai'a przyjmujemy hipotezę o istotnych różnicach pomiędzy drużynami w sensie wielowymiarowym.
+
+#### Testy post-hoc
+
+```{r}
+grouped.data <- LPL2 %>%
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable)
+```
+
+Ze względu na niespełnienie założenia o normalności nie można wykorzystać testu ANOVA do porównań międzygrupowych. W tym celu wykorzystana będzie wersja nieparametryczna - test Kruskala-Wallisa
+
+```{r include=FALSE}
+grouped.data %>% welch_anova_test(value ~ Team)
+grouped.data %>% kruskal_test(value ~ Team)
+grouped.data %>% anova_test(value ~ Team)
+```
+
+```{r}
+tab <- grouped.data %>% kruskal_test(value ~ Team)
+tab[,c(-2,-7)] %>% 
+  kable(caption = "Kruskal-Wallis test") %>% 
+  kable_classic_2(full_width = F) %>% 
+  row_spec(2:4, background = "yellow")
+```
+
+Do porównań parami wykorzystany będzie test Games'a-Howell'a ze względu na niespełnienie założenia o homogeniczności wariancji oraz o zblansowanej liczbie obserwacji w grupach.
+
+```{r}
+pwc <- LPL2 %>%
+  gather(key = "variables", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Team) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc2 <- pwc %>% 
+  subset(.,p.adj.signif!="ns")
+pwc2[,-2] %>% 
+  kable(caption = "Games-Howell test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+```{r}
+filtr <- filter(LPL2,Team %in% c("JD Gaming","Rare Atom","Team WE",
+                                "Royal Never Give Up","TT","Top Esports",
+                                "Victory Five"))
+pwc_kills <- pwc2 %>% 
+  subset(.,variables=="Kills") %>% 
+  subset(.,p.adj.signif %in% c("***","****"))
+pwc_kills$y.position <- seq(35, by = 1.5, length.out = 9)
+pwc_kills$xmin <- c(2,2,2,6,6,6,5,4,4)
+pwc_kills$xmax <- c(6,4,7,5,1,3,4,1,3)
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 4.5133, p= "<0.0001", parameter = "64,6996",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = "Kills", merge = T)+
+  stat_pvalue_manual(
+    pwc_kills, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Zdobyte eliminacje \n")
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+filtr <- filter(LPL2,Team %in% c("JD Gaming","Rare Atom","Team WE",
+                                "Royal Never Give Up"))
+pwc_kills <- pwc2 %>% 
+  subset(.,variables=="Kills") %>% 
+  subset(.,p.adj.signif %in% c("****"))
+pwc_kills$y.position <- seq(35, by = 2, length.out = 3)
+pwc_kills$xmin <- c(1,1,3)
+pwc_kills$xmax <- c(4,2,4)
+
+ggboxplot(filtr,x = "Team", y = "Kills", merge = T)+
+  stat_pvalue_manual(
+    pwc_kills, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Zdobyte eliminacje \n")
+```
+
+```{r}
+filtr <- filter(LPL2,Team %in% c("Edward Gaming","Invictus Gaming","LGD Gaming",
+                                "Top Esports","Ultra Prime"))
+pwc_Vs_kills <- pwc2 %>% 
+  subset(.,variables=="Vs_kills") %>% 
+  subset(.,p.adj.signif %in% c("**","***"))
+pwc_Vs_kills$y.position <- seq(37, by = 1.5, length.out = 5)
+pwc_Vs_kills$xmin <- c(4,4,4,3,1)
+pwc_Vs_kills$xmax <- c(2,3,5,1,5)
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = "Vs_kills", merge = T)+
+  stat_pvalue_manual(
+    pwc_Vs_kills, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Stracone eliminacje \n")
+```
+
+```{r}
+filtr <- filter(LPL2,Team %in% c("Royal Never Give Up","Team WE","Top Esports"))
+pwc_golds <- pwc2 %>% 
+  subset(.,variables=="Golds") %>% 
+  subset(.,p.adj.signif=="**")
+pwc_golds$y.position <- seq(110, by = 3, length.out = 2)
+pwc_golds$xmin <- c(1,2)
+pwc_golds$xmax <- c(2,3)
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(filtr,x = "Team", y = "Golds", merge = T)+
+  stat_pvalue_manual(
+    pwc_golds, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("Golds")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Zdobyte złoto \n")
+```
+
+### Wnioski
+
+Z przeprowadzonej wielowymiarowej analizy wariancji widać że Chiny są podobne do Korei pod względem zróżnicowania regionu. Test Kruskala-Wallisa wykazał istotne różnice w trzech z czterech statystyk.
+
+Testy post-hoc wskazały prawie 40 różnic pomiędzy drużynami. Pomimo dużej liczby różnic, te najsilniejsze, tak jak w przypadku poprzednich regionów są pomiędzy drużynami wysłanymi na mistrzostwa świata (zajmujące premiowane miejsca podczas regularnego sezonu) a tymi które przez cały sezon zajmowały pozycje na dole tabeli.
+
+W regionie Chin nie ma jednak przypadku żeby jakaś drużyna znacząco różniła się od innych we wszytkich trzech statystykach jednocześnie.
+
+
+# Analiza globalnych różnich
+
+Segment badania poszczególnych drużyny w obrębie jednej lokalizacji turniejowej pozwala przypuszać że odrębne regiony rzeczywiście cechują się inną dynamiką rozgrywek, a zatem też różnicami pod względem najważniejszych statystyk określających styl gry tj. zdobyte eliminacje, zdobyte złoto, czas gry, oddane eliminacje.
+
+Poprzez analizę danych z meczy z całego regionu bez podziału na drużyny możliwe będzie określenie czy rzeczywiście występują istotne statystycznie różnice w stylu rozgrywek.
+
+W tym celu wykorzystano wielowymiarowy test MANOVA.
+
+#### Obserwacje odstające
+
+W zbiorze występują dwie obserwacje odstająca ekstremalnie jednowymiarowo ze względu na zmienną "czas gry". Dalsze etapy analizy będą prowadzone bez tych obserwacji.
+
+```{r include=FALSE, echo=FALSE}
+LOL %>% 
+  group_by(Region) %>% 
+  identify_outliers(Vs_kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LOL %>% 
+  group_by(Region) %>% 
+  identify_outliers(Kills) %>% 
+  subset(.,is.extreme==TRUE)
+
+LOL %>% 
+  group_by(Region) %>% 
+  identify_outliers(Golds) %>% 
+  subset(.,is.extreme==TRUE)
+
+LOL %>% 
+  group_by(Region) %>% 
+  identify_outliers(Duration_sec) %>% 
+  subset(.,is.extreme==TRUE)
+
+extrm <- LOL %>% 
+  group_by(Region) %>% 
+  identify_outliers(Duration_sec) %>% 
+  subset(.,is.extreme==TRUE)
+
+LOL2 <- setdiff(LOL,extrm[,1:18])
+```
+
+```{r}
+extrm[,-c(9:12,14:17)] %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+```
+
+W zbiorze występuje 20 obserwacje odstające wilowymiarowo, dalsze etapy będą prowadzone bez tych obserwacji.
+
+```{r}
+extrm2 <- LOL2[,c("Golds","Kills","Vs_kills","Duration_sec","Region")] %>% 
+  group_by(Region) %>% 
+  mahalanobis_distance() %>% 
+  filter(.,is.outlier==TRUE)
+
+head(extrm2) %>% 
+  kable() %>% 
+  kable_classic_2(full_width = F)
+
+LOL2 <- anti_join(LOL2, extrm2, by = c("Golds","Kills","Vs_kills"))
+```
+
+#### Badanie normalności jedno i wielowymiarowej
+
+```{r include=FALSE}
+LOL2 %>%
+  group_by(Region) %>%
+  shapiro_test(Golds, Kills, Duration_sec, Vs_kills) %>%
+  arrange(variable) %>% 
+  filter(.,p<0.05)
+```
+
+```{r}
+tab <- LOL2 %>%
+  select(Golds, Kills, Duration_sec, Vs_kills) %>%
+  mshapiro_test()
+tab$Wniosek <- "Brak normalności wielowymiarowej"
+tab %>% 
+  kable(digits = 12,caption = "M-Shapiro test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+```{r include=FALSE}
+LOL %>% 
+  group_split(Region) %>% 
+  map(~mshapiro_test(.x[,c(3:4,8,17)]))
+```
+
+Założenie o normalności wielowymiarowej jak i normalności jednowymiarowej w przypadku niektórych zmiennych nie jest spełnione. Mimo wszystko test będzie dalej wykonywany ze względu na dosyć mocną odporność MANOVy na odchyłki o normalności. Dodatkowo trzeba będzie uwzględnić niespełnienie tego założenia podczas wykonywania testów post-hoc.
+
+#### Współliniowość
+
+```{r fig.align='center'}
+r <- cor(LOL2[,c("Golds","Kills","Duration_sec","Vs_kills")])
+ggcorrplot(r,lab = T)
+```
+
+Założenie o braku współliniowości zmiennych jest spełnione, wszystkie korelacje są poniżej wartości 0.9.
+
+```{r}
+results <- LOL2 %>%
+  select("Golds","Kills","Vs_kills","Duration_sec", "Region") %>%
+  group_by(Region) %>%
+  doo(~ggpairs(.) + theme_bw(), result = "plots")
+#results$plots
+```
+
+#### Homogeniczność macierzy kowariancji
+
+```{r}
+tab <- box_m(as.data.frame(LOL2[,c("Golds","Kills","Vs_kills","Duration_sec")]), LOL2$Region)
+tab <- tab[,1:2]
+tab$Wniosek <- "Brak homogeniczności macierzy kowariancji"
+tab %>% 
+  kable(digits = 12,caption = "Box's M-test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Założenie nie jest spełnione, występuje brak homogeniczności macierzy kowariancji. Test będzie przeprowadzany dalej z użyciem statystyki Pillaia zamiast Wilka.
+
+#### Homogeniczność wariancji
+
+```{r}
+tab <- LOL2 %>% 
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable) %>%
+  levene_test(value ~ Region)
+tab$Wniosek <- "Brak homogeniczności wariancji"
+tab %>% 
+  kable(digits = 5,caption = "Levene test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+W przypadku wszystkich zmiennych założenie o homogeniczności wariancji nie jest spełnione. Test będzie prowadzony dalej pomimo naruszenia, z mniejszą mocą i wykorzystaniem innych testów post-hoc niż ANOVA.
+
+#### MANOVA
+
+```{r include=FALSE}
+model <- lm(cbind(Golds, Kills, Vs_kills, Duration_sec ) ~ Region, LOL2)
+Manova(model, test.statistic = "Pillai")
+```
+
+```{r}
+tab <- NULL
+tab <- data.frame("test stat" = 0.070462,"approx F" = 24.137,`num Df` = 12,`den Df`=12042,
+                 "p.value" = "< 2.2e-16",`Signif.` = "***")
+tab %>% 
+  kable(digits = 12,caption = "Type II MANOVA Tests: Pillai test statistic") %>% 
+  kable_classic_2(full_width = F)
+```
+
+Zatem na podstawie testu MANOVA ze statystyką Pillai'a przyjmujemy hipotezę o istotnych różnicach pomiędzy regionami w sensie wielowymiarowym.
+
+#### Testy post-hoc
+
+```{r}
+grouped.data <- LOL2 %>%
+  gather(key = "variable", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variable)
+```
+
+Ze względu na niespełnienie założeń o normalności i homogeniczności wariancji nie można wykorzystać testu ANOVA do porównań międzygrupowych. W tym celu wykorzystana będzie wersja nieparametryczna - test Kruskala-Wallisa.
+
+```{r include=FALSE}
+grouped.data %>% welch_anova_test(value ~ Region)
+grouped.data %>% kruskal_test(value ~ Region)
+grouped.data %>% anova_test(value ~ Region)
+```
+
+```{r}
+tab <- grouped.data %>% kruskal_test(value ~ Region)
+tab[,c(-2,-7)] %>% 
+  kable(caption = "Kruskal-Wallis test") %>% 
+  kable_classic_2(full_width = F) %>% 
+  row_spec(1:4, background = "yellow")
+```
+
+Do porównań parami wykorzystany będzie test Games'a-Howell'a ze względu na niespełnienie założenia o homogeniczności wariancji oraz o zblansowanej liczbie obserwacji w grupach.
+
+```{r}
+pwc <- LOL2 %>%
+  gather(key = "variables", value = "value", Golds, Kills, Vs_kills, Duration_sec) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Region) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc2 <- pwc %>% 
+  subset(.,p.adj.signif!="ns")
+pwc2[,-2] %>% 
+  kable(caption = "Games-Howell test") %>% 
+  kable_classic_2(full_width = F)
+```
+
+```{r}
+pwc_kills <- LOL2 %>%
+  gather(key = "variables", value = "value", Kills) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Region) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc_kills <- pwc_kills %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_kills <- pwc_kills %>% add_xy_position(x = "Region")
+pwc_kills <- cbind(subset(pwc2,variables=="Kills"),pwc_kills[,7:10])
+```
+
+```{r}
+test.label <- create_test_label(
+  description = "MANOVA", statistic.text = quote(italic("F")),
+  statistic = 24.137, p= "<0.0001", parameter = "12,12042",
+  type = "expression", detailed = TRUE
+  )
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+LOL2$Region <- factor(LOL2$Region, levels = c("LCK","LCS","LEC","LPL"))
+ggboxplot(LOL2,x = "Region", y = "Kills", merge = T)+
+  stat_pvalue_manual(
+    pwc_kills, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Zdobyte eliminacje \n")
+```
+
+```{r}
+pwc_Vs_kills <- LOL2 %>%
+  gather(key = "variables", value = "value", Vs_kills) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Region) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc_Vs_kills <- pwc_Vs_kills %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_Vs_kills <- pwc_Vs_kills %>% add_xy_position(x = "Region")
+pwc_Vs_kills <- cbind(subset(pwc2,variables=="Vs_kills"),pwc_Vs_kills[,7:10])
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(LOL2,x = "Region", y = "Vs_kills", merge = T)+
+  stat_pvalue_manual(
+    pwc_Vs_kills, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("No. eliminations")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Stracone eliminacje \n")
+```
+
+```{r}
+pwc_golds <- LOL2 %>%
+  gather(key = "variables", value = "value", Golds) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Region) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc_golds <- pwc_golds %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_golds <- pwc_golds %>% add_xy_position(x = "Region")
+pwc_golds <- cbind(subset(pwc2,variables=="Golds"),pwc_golds[,7:10])
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(LOL2,x = "Region", y = "Golds", merge = T)+
+  stat_pvalue_manual(
+    pwc_golds, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("Golds")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Zdobyte złoto \n")
+```
+
+```{r}
+pwc_Duration <- LOL2 %>%
+  gather(key = "variables", value = "value", Duration_sec) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Region) %>%
+  select(-estimate, -conf.low, -conf.high) # Remove details
+pwc_Duration <- pwc_Duration %>% 
+  subset(.,p.adj.signif!="ns")
+pwc_Duration <- pwc_Duration %>% add_xy_position(x = "Region")
+pwc_Duration <- cbind(subset(pwc2,variables=="Duration_sec"),pwc_Duration[,7:10])
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggboxplot(LOL2,x = "Region", y = "Duration_sec", merge = T)+
+  stat_pvalue_manual(
+    pwc_Duration, hide.ns = TRUE, tip.length = 0.025, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "red"
+    ) +
+  labs(
+    subtitle = test.label,
+    caption = get_pwc_label(pwc, type = "expression")
+  )+
+  ylab("Time")+
+  theme(legend.position = "none",plot.title = element_text(hjust = 0.5))+
+  ggtitle("Czas gry \n")
+```
+
+## Wnioski
+
+Analiza różnic pomiędzy regionami głównymi pozwala wyciągnąć wnioski i odpowiedzieć na hipotezę o odrębności regionów będącym oraz w pewnym stopniu wyjaśnić przebieg mistrzostw świata 2022.
+
+Test Kruskala-Wallisa wykazał różnice we wszystkich czterech statystykach.
+
+Na podstawie eliminacji zdobytych oraz straconych można zauważyć interesujący przypadek grupowania się regionów. W obu przypadkach Korea i Ameryka różnią się od Eurpy i Chin. Upodabnianie się regionu Amerykańskiego do Koreańskiego może wynikać z transferu wielu zawodników z Azji (13 z 50 zawodników w LCS pochodzi z Korei Południowej).
+
+Ciekawy przypadek stanowi również region Chin, istotnie różniący się od wszystkich pozostałych regionów pod względem czasu trwania gry, posiadając średnio najkrótsze mecze.
+
+Jednym z najczęściej poruszanych tematów przed mistrzostwami jak i ogólnie podczas trwania sezonu jest pojedynek dwóch dominujących regionów: Chin i Korei. Mistrzostwa 2022 dla LPL były bardzo słabe, do półfinału trafiła tylko jedna chińska formacja i aż trzy koreańskie, natomiast finał odbywał się pomiędzy dwiema drużynami koreańskimi. Wyjaśnienie tego stanu rzeczy po części widać z przeprowadzonej analizy wariancji - LCK pod każdym względem istotnie różnił się od LPL.
+
+Formacje z Chin względem Korei podczas gier zdobywały więcej eliminacji, ale i więcej ich oddawały jednocześnie zdobywając mniej złota i znacznie szybciej kończąc gry. Wnisokować można, że ich styl, bardziej dynamiczny, skupiający się na walce okazał się być niefektywny i chaotyczny w starciu z regionem skupiającym się na konsekwentym budowaniu przewagi przez zdobywania zasobów.
+
+# Analiza wpływu wersji gry na statystyki
+
+Kluczowym czynnikiem określającym rozgrywki jest wersja gry na której odbywał się mecz.
+
+W założeniu każda wersja wprowadza do gry zmiany mechanik mające prowadzić do balansu rozgrywki. W praktyce oznaczać to może całkowite przeniesienie ciężaru na elementy które w wersji poprzedniej były mniej istotne i zmniejszenie wpływu mechanik będących do tej pory rdzeniem prowadzenia gry.
+
+W celu zbadania tego wpływu wykorzystano test niezlażności Chi-kwadrat.
+
+```{r}
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Golds, LOL$Patch)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Golds, LEC$Patch))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Golds, LCS$Patch))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Golds, LCK$Patch))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Golds, LPL$Patch))))
+dt %>% 
+  kable(caption = "Zależność zdobytego złota") %>% 
+  kable_classic_2()
+
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Kills, LOL$Patch)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Kills, LEC$Patch))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Kills, LCS$Patch))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Kills, LCK$Patch))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Kills, LPL$Patch))))
+dt %>% 
+  kable(caption = "Zależność zdobytych eliminacji") %>% 
+  kable_classic_2()
+
+```
+
+::: {layout-ncol=2}
+```{r fig.align = 'center', fig.width=9.5, fig.height=7, include=FALSE}
+Chi1 <- LOL
+Chi1$Region <- "Global"
+Chi1 <- rbind(Chi1, LPL)
+
+ggplot(Chi1, aes(x=Kills, y=Patch,fill = Region))+
+  geom_boxplot(position=position_dodge(0.8),width = 0.65)+
+  labs(title="Rozkład eliminacji w podziale na wersję")+
+  theme_bw()+
+  theme(axis.title.y=element_blank())
+```
+
+```{r}
+ggplot(LPL, aes(x=Kills, y=Patch, fill="red"))+
+  geom_boxplot()+
+  labs(title="Rozkład eliminacji w podziale na wersję", subtitle = "Chiny")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+  #scale_fill_manual(values = "orange")
+```
+
+```{r}
+ggplot(LOL, aes(x=Kills, y=Patch, fill="red"))+
+  geom_boxplot()+
+  labs(title="Rozkład eliminacji w podziale na wersję", subtitle = "Globalnie")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#619CFF")
+```
+
+:::
+
+```{r}
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Dragons, LOL$Patch)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Dragons, LEC$Patch))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Dragons, LCS$Patch))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Dragons, LCK$Patch))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Dragons, LPL$Patch))))
+dt %>% 
+  kable(caption = "Zależność zdobytych smoków") %>% 
+  kable_classic_2()
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LPL, aes(x=Dragons, y=Patch, fill="red"))+
+  geom_boxplot()+
+  labs(title="Rozkład zdobytych smoków w podziale na wersję", subtitle = "Chiny")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+  #scale_fill_manual(values = "orange")
+```
+
+
+```{r}
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Towers, LOL$Patch)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Towers, LEC$Patch))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Towers, LCS$Patch))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Towers, LCK$Patch))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Towers, LPL$Patch))))
+dt %>% 
+  kable(caption = "Zależność zdobytych struktur") %>% 
+  kable_classic_2()
+
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Duration_sec, LOL$Patch)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Duration_sec, LEC$Patch))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Duration_sec, LCS$Patch))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Duration_sec, LCK$Patch))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Duration_sec, LPL$Patch))))
+dt %>% 
+  kable(caption = "Zależność czasu gry") %>% 
+  kable_classic_2()
+```
+
+::: {layout-nrow=2}
+
+```{r}
+ggplot(LEC, aes(x=Duration_sec, y=Patch,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na wersję", subtitle = "Europa")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+```
+
+```{r}
+ggplot(LCS, aes(x=Duration_sec, y=Patch,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale wersję", subtitle = "Ameryka")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#619CFF")
+```
+
+```{r}
+ggplot(LCK, aes(x=Duration_sec, y=Patch,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na wersję", subtitle = "Korea")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#7CAE00")
+```
+
+```{r}
+ggplot(LPL, aes(x=Duration_sec, y=Patch,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na wersję", subtitle = "Chiny")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#C77CFF")
+```
+
+:::
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LOL, aes(x=Duration_sec, y=Patch,fill="Region"))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na wersję", subtitle = "Globalnie")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+```
+
+
+# Analiza wpływu rodzaju turnieju na statystyki
+
+Czynnikiem intuicyjnie podejrzanym o posiadanie wpływu na styl gry jest rodzaj turnieju.
+
+Szczególnie istotny jest podział na trunieje lokalne i międzyregionalne, ponieważ ze względu na wcześniej wykazane różnice pomiędzy regionami, udział w takich turniejach implikuje starcie odmiennych podejść do rozgrywki.
+
+W celu zbadania tego wpływu wykorzystano test niezlażności Chi-kwadrat.
+
+```{r}
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Golds, LOL$Tournament)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Golds, LEC$Tournament))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Golds, LCS$Tournament))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Golds, LCK$Tournament))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Golds, LPL$Tournament))))
+dt %>% 
+  kable(caption = "Zależność zdobytego złota") %>% 
+  kable_classic_2()
+
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Kills, LOL$Tournament)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Kills, LEC$Tournament))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Kills, LCS$Tournament))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Kills, LCK$Tournament))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Kills, LPL$Tournament))))
+dt %>% 
+  kable(caption = "Zależność zdobytych eliminacji") %>% 
+  kable_classic_2()
+```
+
+
+::: {layout-ncol=2 }
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LPL, aes(x=Kills, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład eliminacji w podziale na rodzaj turnieju", subtitle = "Chiny")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#F8766D")
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LCK, aes(x=Kills, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład eliminacji w podziale na rodzaj turnieju", subtitle = "Korea")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#619CFF")
+```
+:::
+
+```{r}
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Dragons, LOL$Tournament)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Dragons, LEC$Tournament))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Dragons, LCS$Tournament))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Dragons, LCK$Tournament))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Dragons, LPL$Tournament))))
+dt %>% 
+  kable(caption = "Zależność zdobytych smoków") %>% 
+  kable_classic_2()
+```
+
+::: {layout-ncol=2}
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LCS, aes(x=Dragons, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład zdobytych smoków w podziale na rodzaj turnieju", subtitle = "Ameryka")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LPL, aes(x=Dragons, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład zdobytych smoków w podziale na rodzaj turnieju", subtitle = "Chiny")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#619CFF")
+```
+
+:::
+
+```{r}
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Towers, LOL$Tournament)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Towers, LEC$Tournament))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Towers, LCS$Tournament))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Towers, LCK$Tournament))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Towers, LPL$Tournament))))
+dt %>% 
+  kable(caption = "Zależność zdobytych struktur") %>% 
+  kable_classic_2()
+```
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LCS, aes(x=Towers, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład zdobytych struktur w podziale na rodzaj turnieju", subtitle = "Ameryka")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+```
+
+```{r}
+dt <- data.frame("region" = "Globalnie")
+dt <- cbind(dt,chisq_test(table(LOL$Duration_sec, LOL$Tournament)))
+dt <- rbind(dt,cbind("region"="Europa",chisq_test(table(LEC$Duration_sec, LEC$Tournament))))
+dt <- rbind(dt,cbind("region"="Ameryka",chisq_test(table(LCS$Duration_sec, LCS$Tournament))))
+dt <- rbind(dt,cbind("region"="Korea",chisq_test(table(LCK$Duration_sec, LCK$Tournament))))
+dt <- rbind(dt,cbind("region"="Chiny",chisq_test(table(LPL$Duration_sec, LPL$Tournament))))
+dt %>% 
+  kable(caption = "Zależność czasu gry") %>% 
+  kable_classic_2()
+```
+
+::: {layout-nrow=2}
+
+```{r}
+ggplot(LEC, aes(x=Duration_sec, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na rodzaj turnieju", subtitle = "Europa")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+```
+
+```{r}
+ggplot(LCS, aes(x=Duration_sec, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na rodzaj turnieju", subtitle = "Ameryka")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#619CFF")
+```
+
+```{r}
+ggplot(LCK, aes(x=Duration_sec, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na rodzaj turnieju", subtitle = "Korea")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#7CAE00")
+```
+
+```{r}
+ggplot(LPL, aes(x=Duration_sec, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na rodzaj turnieju", subtitle = "Chiny")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())+
+  scale_fill_manual(values = "#C77CFF")
+```
+
+:::
+
+```{r fig.align = 'center', fig.width=9.5, fig.height=7}
+ggplot(LOL, aes(x=Duration_sec, y=Tournament,fill=""))+
+  geom_boxplot()+
+  labs(title="Rozkład czasu gry w podziale na rodzaj turnieju",subtitle = "Globalnie")+
+  theme_bw()+
+  theme(legend.position = "none",axis.title.y=element_blank())
+```
+
+# Modele predykcyjne
+
+## Drzewo decyzyjne
+
+Drzewo decyzyjne zbudowane z wykorzystaniem statystyk: Golds, Kills, Vs_kills, Duration_sec w metodzie klasyfikacyjnej.
+
+```{r}
+#set.seed(44)
+#ind <- sample(1:4000,3000, replace = F)
+#lol_tr <- LOL[ind,]
+#lol_te <- setdiff(LOL,lol_tr)
+set.seed(44)
+data_split <- initial_split(LOL, prop = 0.7)
+lol_tr <- training(data_split)
+lol_te <- testing(data_split)
+mdl <- rpart::rpart(Win ~ Golds+Kills+Vs_kills+Duration_sec, lol_tr, method = "class")
+pred <- predict(mdl,lol_te, type = "class")
+tabela <- table(pred=pred,lol_te$Win)
+kable(tabela) %>% 
+  kable_classic_2(full_width = F)
+prop <- prop.table(tabela)
+skt <- sum(diag(prop))
+```
+
+Skuteczność modelu drzewa decyzyjnego wynosi `r round(skt*100,2)`%
+
+#### Wykres drzewa
+
+```{r fig.align = 'center'}
+fancyRpartPlot(mdl, caption = NULL)
+```
+
+Co ciekawe do predykcji rezultatu wykorzystana jest jedynie informacja o eliminacjach obu drużyn.
+
+## Las losowy
+
+Las losowy zbudowany z formułą zależności wygranej od statystyk: Golds, Kills, Vs_kills, Duration_sec przy dostrajaniu trzech parametrów i wykorzystaniu silnika "Ranger". Kryterium wyboru najlepszego modelu było pole powierzchni pod krzywą ROC. 
+
+```{r}
+load(file = "C:\\Users\\Patryk\\Desktop\\Studia\\Projekt_analiza\\conf_matrix.rda")
+kable(table(conf_matrix$.pred_class, conf_matrix$Win)) %>%
+  kable_classic_2(full_width = F)
+prop <- prop.table(table(conf_matrix$.pred_class, conf_matrix$Win))
+skt <- sum(diag(prop))
+```
+
+Skuteczność modelu lasu losowego jest wyższa niż pojedynczego drzewa decyzyjnego i wynosi wynosi `r round(skt*100,2)`%
